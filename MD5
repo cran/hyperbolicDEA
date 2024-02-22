@@ -1,0 +1,14 @@
+d7f9a76f9ebd9f4ec1f5d6c6f783345e *DESCRIPTION
+7420c3435de96c603a7eac5974e3ad63 *LICENSE
+c581dc6070df1c1f2ede2c134dcf3e5c *NAMESPACE
+5e4bae93b128521236d3f65a103c7a48 *R/costDEA.R
+7a5e183093294fd45ccce42f16305923 *R/hyperbolicDEA.R
+9a1bfa1b34f83cbff9affe2afb55718a *R/lprofitDEA.R
+4a944f9d71399c98794a6456d8679a90 *R/nlprofitDEA.R
+49322e18bc98f2e01f48873107d43f6b *README.md
+75a4f572ac6ed3c7f7cb50b6f3b2a934 *man/costDEA.Rd
+5301a3ef1a0dcf4b6f77e64099c72a20 *man/hyperbolicDEA.Rd
+da825138fe98080f7706cd658623d31a *man/lprofitDEA.Rd
+e1abb9bbf539f08fff7a570f5a2461e9 *man/nlprofitDEA.Rd
+5eb9c7385ddd9a0f93218d310178b677 *tests/testthat.R
+138e001fe5d422d50412e43b8b89fbd8 *tests/testthat/test-hyperbolicDEA.R
