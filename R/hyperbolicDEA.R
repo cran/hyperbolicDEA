@@ -6,31 +6,57 @@
 #' "Data Envelopment Analysis and Hyperbolic Efficiency Measures: Extending Applications and Possiblities
 #' for Between-Group Comparisons" (2023) by Alexander Öttl, Mette Asmild, and Daniel Gulde.
 #'
-#' @param X Matrix or dataframe with DMUS as rows and inputs as columns
-#' @param Y Matrix or dataframe with DMUs as rows and outputs as columns
+#' @param X Vector, matrix or dataframe with DMUs as rows and inputs as columns
+#' @param Y Vecotr, matrix or dataframe with DMUs as rows and outputs as columns
 #' @param RTS Character string indicating the returns-to-scale, e.g. "crs", "vrs", "ndrs", "nirs", "fdh"
-#' @param WR Matrix with one row per homogeneous linear weight restriction in standard form, ncol(WR) = ncol(X) + ncol(Y)
-#' @param SLACK Variable indicating whether an additional estimation of slacks shall be performed
-#' @param ACCURACY Accuracy value for non-linear programmer
-#' @param XREF Matrix or dataframe with firms defining the technology as rows and inputs as columns
-#' @param YREF Matrix or dataframe with firms defining the technology as rows and outputs as columns
-#' @param SUPEREFF Variable indicating whether super-efficiencies shall be estimated
-#' @param NONDISC_IN Vector containing indices of the input matrix that are non-discretionary variables
-#' @param NONDISC_OUT Vector containing indices of the output matrix that are non-discretionary variables
-#' @param PARALLEL Integer of amount of cores that should be used for estimation (Check availability of computer)
+#' @param WR Matrix with one row per homogeneous linear weight restriction in standard form. The columns are 
+#' ncol(WR) = ncol(Y) + ncol(X). Hence the first ncol(Y) columns are the restrictions on outputs and the last ncol(X) columns are the 
+#' restrictions on inputs. 
+#' @param SLACK Boolean variable indicating whether an additional estimation of slacks shall be performed when set to 'TRUE'.  
+#' Be aware that SLACK estimation can change the lambda values.
+#' @param ACCURACY Accuracy value for non-linear programm solver.
+#' @param XREF Vector, matrix or dataframe with firms defining the technology as rows and inputs as columns
+#' @param YREF Vector, matrix or dataframe with firms defining the technology as rows and outputs as columns
+#' @param SUPEREFF Boolean variable indicating whether super-efficiencies shall be estimated
+#' @param NONDISC_IN Vector containing column indices of the input matrix that are non-discretionary variables e.g. c(1,3) so the first and the third input are non-discretionary
+#' @param NONDISC_OUT Vector containing column indices of the output matrix that are non-discretionary variables e.g. c(1,3) so the first and the third output are non-discretionary
+#' @param PARALLEL Integer of amount of cores that should be used for parallel computing (Check availability of computer)
 #' @param ALPHA ALPHA can be chosen between [0,1]. It indicates the relative weights given to the distance function to
 #' both outputs and inputs when approaching the frontier. More weight on the input orientation is set by alpha < 0.5. Here,
 #' the input efficiency score is estimated in the package. To receive the corresponding output efficiency score, estimate: e^((1-alpha)/alpha).
 #' Vice versa for an output weighted model alpha > 0.5. The output efficiency is given and the input efficiency can
 #' be recovered with: e^(alpha/(1-alpha))
+#' 
 #'
-#' @return A list object containing efficiency scores, lambdas, and potentially slacks and
-#' binding parameters in the weight restrictions (mus)
+#' @return A list object containing the following information:
+#' \item{eff}{Are the estimated efficiency scores for the DMUs under observation stored 
+#' in a vector with the length nrow(X).}
+#' \item{lambdas}{Estimated values for the composition of the respective Benchmarks.
+#' The lambdas are stored in a matrix with the dimensions nrow(X) x nrow(X), where
+#' the row is the DMU under observation and the columns the peers used for the Benchmark.}
+#' \item{mus}{If WR != NULL, the estimated decision variables for the imposed weight restrictions
+#'  are stored in a matrix with the dimensions nrow(X) x nrow(WR), where the rows are the DMUs and 
+#'  columns the weight restrictions. If the values are positive, the WR is binding for the respective DMU.}
+#' \item{slack}{If SLACK = TRUE, the slacks are estimated and stored in a matrix with the dimensions
+#' nrow(X) x (ncol(X) + ncol(Y)). Showing the Slack of each DMU (row) for each input and output
+#' (column).}
+#' 
 #'
 #' @examples
 #' X <- c(1,1,2,4,1.5,2,4,3)
 #' Y <- c(1,2,4,4,0.5,2.5,3.5,4)
-#' hyperbolicDEA(X,Y,RTS="vrs", SUPEREFF = FALSE)
+#' # we now impose linked weght restrictions. We assume outputs decrease by 
+#' # four units when inputs are reduced by one. And we assume that outputs can
+#' # can be increased by one when inputs are increased by four 
+#'
+#' WR <- matrix(c(-4,-1,1,4), nrow = 2, byrow = TRUE)
+#' hyperbolicDEA(X,Y,RTS="vrs", WR = WR)
+#'
+#' # Another example having the same data but just estimate the results for DMU 1
+#' # using XREF YREF and and a higher focus on inputs adjusting the ALPHA towards 0.
+#' # Additionally, slacks are estimated.
+#'
+#' hyperbolicDEA(X[1],Y[1],RTS="vrs", XREF = X, YREF = Y, WR = WR, ALPHA = 0.1, SLACK = TRUE)
 #'
 #' @import dplyr
 #' @import nloptr
@@ -47,78 +73,67 @@ hyperbolicDEA <- function(X, Y, RTS = "vrs", WR = NULL, SLACK=FALSE,
                            PARALLEL = 1, ALPHA = 0.5){
 
   # Check arguments given by user
-  if (!is.matrix(X) && !is.data.frame(X) && !is.numeric(X)){
-    stop("X must be a numeric vector, matrix or dataframe")
-  }
+  check_arguments(X = X, Y = Y, RTS = RTS, WR = WR, XREF = XREF, 
+                  YREF = YREF, NONDISC_IN = NONDISC_IN, NONDISC_OUT = NONDISC_OUT,
+                  ALPHA = ALPHA)
+  
   if (!is.matrix(X)){
     X <- as.matrix(X)
-  }
-  if (!is.matrix(Y) && !is.data.frame(Y) && !is.numeric(Y)){
-    stop("Y must be a numeric vector, matrix or dataframe")
   }
   if (!is.matrix(Y)){
     Y <- as.matrix(Y)
   }
   if (!is.null(WR)){
-    if (ncol(WR) != ncol(X) + ncol(Y)){
-      stop("WR must be a matrix of weight restrictions in standard form,
-           ncol(WR) = ncol(Y) + ncol(X)")
+    if (!is.matrix(WR) && !is.data.frame(WR)){
+      WR <- t(as.matrix(WR))
     }
   }
+  if (!is.null(XREF)&&!is.null(YREF)){
+    if (!is.matrix(XREF)){
+      XREF <- as.matrix(XREF)
+    }
+    if (!is.matrix(YREF)){
+      YREF <- as.matrix(YREF)
+    }
+  }  
 
-  possible_rts <- c("crs", "vrs", "ndrs", "nirs", "fdh")
   RTS <- tolower(RTS)
-  if (!(RTS %in% possible_rts)){
-    stop("Unknown scale of returns:", RTS)
-  }
+  
 
-  # Variable for if condition in SLACK estimation
+  # Variable for if condition in SLACK estimation and WR,X,Y,XREF,YREF for post scaling
   XREF_YREF <- FALSE
+  WR_slack <- WR
+  X_slack <- X
+  Y_slack <- Y
+  ifelse(!is.null(XREF), XREF_slack <- XREF, XREF_slack <- X)
+  ifelse(!is.null(YREF), YREF_slack <- YREF, YREF_slack <- Y)
 
   # scaling adjustments
   # and referring X and Y to XREF and YREF as well as matrix definition
+  WR_scaler <- NULL # used to adjust mus again to original scale
   if (is.null(XREF)&&is.null(YREF)){
-
-    scaled_values <- scale(rbind(cbind(Y,X),WR), center = FALSE)
-    Y <- as.matrix(scaled_values[1:nrow(X),1:ncol(Y)])
-    X <- as.matrix(scaled_values[1:nrow(X),(ncol(Y)+1):(ncol(X)+ncol(Y))])
     if (!is.null(WR)){
-      WR <- matrix(scaled_values[(nrow(X)+1):(nrow(X)+nrow(WR)),1:(ncol(X)+ncol(Y))],
-                   ncol = (ncol(X)+ncol(Y)))
+      # Scaling weights to observed values - taking mean of all variables that 
+      # are in the WR and adjusting with mean of absolute values of WR
+      WR_scaler <- mean(cbind(Y,X)[,which(colSums(WR != 0) > 0)])/mean(abs(WR[WR != 0]))
+      WR <- t(t(WR*WR_scaler)/c(colMeans(Y),colMeans(X)))
     }
+    X <- t(t(X)/colMeans(X))
+    Y <- t(t(Y)/colMeans(Y))
 
     XREF <- X
     YREF <- Y
 
   } else{
-    if (!is.matrix(XREF) && !is.data.frame(XREF) && !is.numeric(XREF)){
-      stop("XREF must be a numeric vector, matrix or dataframe")
-    }
-    if (!is.matrix(XREF)){
-      XREF <- as.matrix(XREF)
-    }
-    if (!is.matrix(YREF) && !is.data.frame(YREF) && !is.numeric(YREF)){
-      stop("YREF must be a numeric vector, matrix or dataframe")
-    }
-    if (!is.matrix(YREF)){
-      YREF <- as.matrix(YREF)
-    }
-    if ((ncol(as.matrix(YREF))+ncol(as.matrix(XREF))) != (ncol(as.matrix(X)) + ncol(as.matrix(Y)))){
-      stop("XREF and YREF must be the same input-output combination:
-           ncol(XREF) = ncol(X); ncol(YREF) = ncol(Y)")
-    }
-
     # equal scaling of XREF YREF and Y and X
-    XREF_YREF <- TRUE
-    scaled_values <- scale(rbind(cbind(rbind(Y,YREF),rbind(X,XREF)), WR) , center = FALSE)
-    Y <- as.matrix(scaled_values[1:nrow(X),1:ncol(Y)])
-    X <-  as.matrix(scaled_values[1:nrow(X),(ncol(Y)+1):(ncol(X)+ncol(Y))])
-    YREF <- as.matrix(scaled_values[(nrow(X)+1):(nrow(X)+nrow(XREF)),1:ncol(Y)])
-    XREF <- as.matrix(scaled_values[(nrow(X)+1):(nrow(X)+nrow(XREF)),(ncol(Y)+1):(ncol(X)+ncol(Y))])
     if (!is.null(WR)){
-      WR <- matrix(scaled_values[(nrow(X)+nrow(XREF)+1):(nrow(X)+nrow(XREF)+nrow(WR)),
-                                 1:(ncol(X)+ncol(Y))], ncol = (ncol(X)+ncol(Y)))
+      WR_scaler <- mean(cbind(YREF,XREF)[,which(colSums(WR != 0) > 0)])/mean(abs(WR[WR != 0]))
+      WR <- matrix(t(t(WR * WR_scaler)/c(colMeans(YREF),colMeans(XREF))), nrow = nrow(WR))
     }
+    X <- t(t(X)/colMeans(XREF))
+    Y <- t(t(Y)/colMeans(YREF))
+    XREF <- t(t(XREF)/colMeans(XREF))
+    YREF <- t(t(YREF)/colMeans(YREF))
   }
 
   # adjustments to NONDISC variables
@@ -136,17 +151,14 @@ hyperbolicDEA <- function(X, Y, RTS = "vrs", WR = NULL, SLACK=FALSE,
   theta <- c()
 
   lambdas <- matrix(NA, nrow = nrow(X), ncol = nrow(XREF))
-  colnames(lambdas) <- paste("L", 1:nrow(XREF), sep = "")
-  rownames(lambdas) <- paste("DMU", 1:nrow(X))
 
-  if (is.null(WR)){
-    mus <- NULL
-  } else{
+  if (!is.null(WR)){
     mus <- matrix(NA, nrow = nrow(X), ncol = nrow(WR))
-    colnames(mus) <- paste("MU", 1:nrow(WR), sep = "")
+  } else{
+    mus <- NULL
   }
 
-  results <- list(eff = eff, lambdas = lambdas, mus = mus)
+
 
   #register multicore estimation if adjusted
   if (PARALLEL > 1){
@@ -409,7 +421,7 @@ hyperbolicDEA <- function(X, Y, RTS = "vrs", WR = NULL, SLACK=FALSE,
   # Extract results for weight restrictions
   for (i in 1:nrow(X)){
     if (!is.null(WR)){
-      results$mus[i,] <- result_list[[i]]$solution[(nrow(XREF)+2):(nrow(XREF)+1+nrow(WR))]
+      mus[i,] <- result_list[[i]]$solution[(nrow(XREF)+2):(nrow(XREF)+1+nrow(WR))]
     }
 
     # fdh estimation
@@ -424,9 +436,9 @@ hyperbolicDEA <- function(X, Y, RTS = "vrs", WR = NULL, SLACK=FALSE,
         peer_list <- c()
         eff_list <- c()
         for (j in 1:nrow(XREF)){
-          lambdas <- c(rep(0, nrow(XREF)))
-          lambdas[j] <- 1
-          rhs <- c(lambdas%*%XREF, lambdas%*%YREF)
+          lambdas_fdh <- c(rep(0, nrow(XREF)))
+          lambdas_fdh[j] <- 1
+          rhs <- c(lambdas_fdh%*%XREF, lambdas_fdh%*%YREF)
           # The following line has a ifelse condition to select only DMUs that
           # are worse of for comparison. Hence, for input efficiency we are only
           # interested in DMUs that have similar or lower output levels. For output
@@ -457,10 +469,10 @@ hyperbolicDEA <- function(X, Y, RTS = "vrs", WR = NULL, SLACK=FALSE,
         possible_eff <- data.frame(peer_list, eff_list)
         eff_fdh <- min(possible_eff$eff_list)
         peer <- which(possible_eff[, "eff_list"] == eff_fdh)[1]
-        lambdas <- c(rep(0, nrow(XREF)))
-        lambdas[peer] <- 1
+        lambdas_fdh <- c(rep(0, nrow(XREF)))
+        lambdas_fdh[peer] <- 1
         eff <- c(eff, eff_fdh)
-        results$lambdas[i,] <- lambdas
+        lambdas[i,] <- lambdas_fdh
         theta <- c(theta, min(theta_list))
       } else{
         stop("FDH cannot be combined with weight restrictions")
@@ -472,114 +484,41 @@ hyperbolicDEA <- function(X, Y, RTS = "vrs", WR = NULL, SLACK=FALSE,
                              result_list[[i]]$solution[nrow(XREF)]^(1 - ALPHA)))
         lambda <- result_list[[i]]$solution[1:(nrow(XREF)-1)]
         lambda <- append(lambda, NA, after = i-1)
-        results$lambdas[i,] <- lambda
+        lambdas[i,] <- lambda
       } else{
         # Storage of results if not fdh or super-efficiency
         eff <- c(eff, ifelse(ALPHA >= 0.5, result_list[[i]]$solution[nrow(XREF)+1]^ALPHA,
                              result_list[[i]]$solution[nrow(XREF)+1]^(1 - ALPHA)))
-        results$lambdas[i,] <- result_list[[i]]$solution[1:nrow(XREF)]
+        lambdas[i,] <- result_list[[i]]$solution[1:nrow(XREF)]
         # For Slack estimation Theta
         theta <- c(theta, result_list[[i]]$solution[nrow(XREF)+1])
       }
     }
   }
 
-  results$eff <- eff
-
 
   ####### Slack estimation if True ######
   if (SLACK){
 
-    # unscale for slack estimation
-    if (XREF_YREF){
-      non_scaled_values <- t(apply(scaled_values, 1, function(r)r*attr(scaled_values,'scaled:scale')))
-      X <- as.matrix(non_scaled_values[1:nrow(X),(ncol(Y)+1):(ncol(X)+ncol(Y))])
-      Y <-  as.matrix(non_scaled_values[1:nrow(X),1:ncol(Y)])
-      XREF <- as.matrix(non_scaled_values[(nrow(X)+1):(nrow(X)+nrow(XREF)),(ncol(Y)+1):(ncol(X)+ncol(Y))])
-      YREF <- as.matrix(non_scaled_values[(nrow(X)+1):(nrow(X)+nrow(XREF)),1:ncol(Y)])
-
-    } else{
-      # YREF and XREF are the same as X and Y if not specified
-      non_scaled_values <- t(apply(scaled_values, 1, function(r)r*attr(scaled_values,'scaled:scale')))
-      X <- as.matrix(non_scaled_values[,(ncol(Y)+1):(ncol(X)+ncol(Y))])
-      Y <-  as.matrix(non_scaled_values[,1:ncol(Y)])
-      XREF <- as.matrix(non_scaled_values[,(ncol(Y)+1):(ncol(X)+ncol(Y))])
-      YREF <-  as.matrix(non_scaled_values[,1:ncol(Y)])
-    }
-
-    results_slack <- c()
-
-    for (i in 1:nrow(X)){
-      # set up the problem ( number of constraints, number of decision variables)
-      lprec <- make.lp((ncol(X)+ncol(Y)+1),(nrow(XREF)+ncol(X)+ncol(Y)))
-
-      # Set up first part with lambdas and inputs outputs as well as 1 for
-      # the lambda constraint in VRS (sum lambdas = 1)
-      for (k in 1:nrow(XREF)){
-        column <- set.column(lprec, k, c(XREF[k,],YREF[k,],1))
-
-        if (RTS == "fdh"){
-          set.type(lprec, k, "binary")
-        }
-      }
-
-      # Add decision variable for input slack in separate columns
-      for (j in 1:ncol(X)){
-        column <- c(rep(0, ncol(X)+ncol(Y)+1))
-        column[j] <- 1
-        set.column(lprec, nrow(XREF)+j, column)
-      }
-
-      # Add decision variable for output slack in separate columns
-      for (j in 1:ncol(Y)){
-        column <- c(rep(0, ncol(X)+ncol(Y)+1))
-        column[j+ncol(X)] <- -1
-        set.column(lprec, nrow(XREF)+ncol(X)+j, column)
-      }
-
-      # Change to maximization problem
-      lp.control(lprec, sense="max")
-
-      # set objective function only slack decision variables
-      set.objfn(lprec, c(rep(0,nrow(XREF)),rep(1,ncol(X)+ncol(Y))))
-
-      # set the constraint type lambda different for CRS and VRS
-      if (RTS == "crs"){
-        set.constr.type(lprec, c(rep("=", ncol(X)+ncol(Y)),">="))
-      } else{
-        set.constr.type(lprec, c(rep("=", ncol(X)+ncol(Y)+1)))
-      }
-
-      # set bounds 0 to 1 for lambdas in VRS and 0 to inf for slack
-      if (RTS == "vrs"){
-        set.bounds(lprec, upper = c(rep(1,nrow(XREF))), columns = c(1:nrow(XREF)))
-      }
-      set.bounds(lprec, lower = c(rep(0,nrow(XREF)+ncol(X)+ncol(Y))), columns = c(1:(nrow(XREF)+ncol(X)+ncol(Y))))
-      set.bounds(lprec, upper = c(rep(Inf,ncol(X)+ncol(Y))), columns = c((nrow(XREF)+1):(nrow(XREF)+ncol(X)+ncol(Y))))
-
-
-      # Solve the problem
-      if (RTS == "crs"){
-        set.rhs(lprec, c(X[i,]*(theta[i]^(1-ALPHA)),Y[i,]/(theta[i]^ALPHA),0))
-      } else{
-        set.rhs(lprec, c(X[i,]*(theta[i]^(1-ALPHA)),Y[i,]/(theta[i]^ALPHA),1))
-      }
-      solve(lprec)
-      slacks <- get.variables(lprec)
-      results_slack <- rbind(results_slack,slacks)
-    }
-
-    # slack
-    results$slack <- results_slack[,(nrow(XREF)+1):(nrow(XREF)+ncol(X)+ncol(Y))]
-    rownames(results$slack) <- paste("DMU",1:nrow(results$slack))
-    colnames(results$slack) <- c(paste("Sx", 1:ncol(X), sep = ""),
-                                 paste("Sy", 1:ncol(Y), sep = ""))
-
-    # New peers due to slack in lambdas
-    results$lambdas <- results_slack[,1:nrow(XREF)]
-    rownames(results$lambdas) <- paste("DMU",1:nrow(results$lambdas))
-    colnames(results$lambdas) <- paste("L", 1:ncol(results$lambdas), sep = "")
+    slack_est <- slack(X = X_slack, Y = Y_slack, XREF = XREF_slack, 
+                       YREF = YREF_slack, RTS = RTS, 
+                       EFF = theta, ALPHA = ALPHA, WR = WR_slack, 
+                       NONDISC_IN = NONDISC_IN, NONDISC_OUT = NONDISC_OUT)
+    
+    lambdas <- slack_est$lambda
+    slack_results <- slack_est$slack
+  } else{
+    slack_results <- NULL
   }
+  
+  # Renaming results
+  if (!is.null(WR)){
+    mus <- mus*WR_scaler
+    colnames(mus) <- paste("MU", 1:nrow(WR), sep = "")
+  }
+  
+  colnames(lambdas) <- paste("L", 1:nrow(XREF), sep = "")
+  rownames(lambdas) <- paste("DMU", 1:nrow(X))
 
-  return(results)
+  return(list(eff = eff, lambdas = lambdas, mus = mus, slack = slack_results))
 }

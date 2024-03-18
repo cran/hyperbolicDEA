@@ -22,13 +22,17 @@ test_that("Scaling", {
   X2 <- c(1,3,4,5,6,4)/1000000000
   Y2 <- c(1,2,4,4,4,5)/1000000000
 
-  X <- cbind.data.frame(X1,X2)
-  Y <- cbind.data.frame(Y1,Y2)
+  X <- cbind(X1,X2)
+  Y <- cbind(Y1,Y2)
 
   eff_comparison <- Benchmarking::dea(X, Y, RTS="vrs",ORIENTATION="graph")$eff
   eff <- hyperbolicDEA(X, Y, RTS = "vrs")$eff
+  
+  eff_hyp <- hyperbolicDEA(X, Y, RTS = "vrs", ALPHA = 1)$eff
+  eff_wr <- wrDEA(X, Y, RTS = "vrs", ORIENTATION = "out")$eff
 
   expect_equal(round(eff,3), round(eff_comparison,3))
+  expect_equal(round(eff_hyp,3), round(eff_wr,3))
 })
 
 test_that("Weight Restrictions", {
@@ -43,6 +47,19 @@ test_that("Weight Restrictions", {
   eff_NIRS <- hyperbolicDEA(X, Y, RTS = "nirs")$eff
 
   expect_equal(eff_WR, eff_NIRS)
+  
+  in_WR_hyp <- hyperbolicDEA(X, Y, RTS = "vrs", WR = WR, ALPHA = 0)
+  in_WR_lin <- wrDEA(X, Y, RTS = "vrs", ORIENTATION = "in", WR = WR)
+  
+  expect_equal(in_WR_hyp$eff, in_WR_lin$eff)
+  
+  expect_equal(all.equal(round(as.matrix(in_WR_hyp$lambdas),3), 
+                         round(as.matrix(in_WR_lin$lambdas),3), check.attributes = FALSE), TRUE)
+
+  expect_equal(all.equal(round(as.matrix(in_WR_hyp$mus),3), 
+                         round(as.matrix(in_WR_lin$mus),3), check.attributes = FALSE), TRUE)
+  
+  
 })
 
 test_that("ALPHA=1 output orientation", {
@@ -69,13 +86,30 @@ test_that("SLACK", {
   X <- c(1,1,2,3)
   Y <- c(1,2,4,3)
 
-  effHyp<- hyperbolicDEA(X, Y, RTS = "vrs", ALPHA = 1, SLACK = T)
-  eff <- Benchmarking::dea(X, Y, RTS = "vrs", ORIENTATION = "out",SLACK = T)
+  effHyp<- hyperbolicDEA(X, Y, RTS = "vrs", ALPHA = 1, SLACK = TRUE)
+  eff <- Benchmarking::dea(X, Y, RTS = "vrs", ORIENTATION = "out",SLACK = TRUE)
 
   logic_vec <- rowSums(round(effHyp$slack,3)) > 0
   logic_vec <- unname(logic_vec)
 
   expect_equal(logic_vec, eff$slack)
+  
+
+  X <- matrix(c(1,1,2,4,1.5,4,
+                2,4,1,1,4,1.5), ncol = 2)
+  Y <- c(1,1,1,1,1,1)
+  Y <- as.matrix(Y)
+  
+  wr_dea <- wrDEA(X,Y, RTS = "crs", ORIENTATION = "in", SLACK = TRUE)
+  hyp_dea <- hyperbolicDEA(X,Y, RTS = "crs", ALPHA = 0, SLACK = TRUE)
+  BO_dea <- Benchmarking::dea(X,Y, RTS = "crs", ORIENTATION = "in", SLACK = TRUE)
+  
+  slack_sum <- rowSums(round(wr_dea$slack,3)) > 0
+  slack_sum <- unname(slack_sum)
+  
+  expect_equal(all.equal(round(wr_dea$slack,3), round(hyp_dea$slack,3), check.attributes = FALSE), TRUE)
+  expect_equal(slack_sum, BO_dea$slack)
+  
 })
 
 test_that("fdh", {
@@ -144,8 +178,8 @@ test_that("costDEA", {
   
   input_prices <- matrix(c(2,1,2,1,2,1,1,2), ncol =  2, byrow = TRUE)
   
-  min_cost <- costDEA(X,Y,input_prices)
-  BO_cost <- Benchmarking::cost.opt(X,Y,input_prices)
+  min_cost <- costDEA(X,Y,input_prices, RTS = "crs")
+  BO_cost <- Benchmarking::cost.opt(X,Y,input_prices, RTS = "crs")
   
   expect_equal(all.equal(as.matrix(min_cost$opt_value), 
                          as.matrix(BO_cost$xopt), check.attributes = FALSE), TRUE)
@@ -163,36 +197,127 @@ test_that("lprofitDEA", {
   input_prices <- matrix(c(2,1,2,1,2,1,1,2), ncol =  2, byrow = TRUE)
   output_prices <- matrix(c(1,1,1,1), ncol = 1)
   
-  max_profit <- lprofitDEA(X,Y,input_prices, output_prices)
-  BO_revenue <- Benchmarking::profit.opt(X,Y,input_prices, output_prices)
+  max_lprofit <- lprofitDEA(X,Y,input_prices, output_prices, RTS = "crs")
+  BO_profit <- Benchmarking::profit.opt(X,Y,input_prices, output_prices, RTS = "crs")
   
-  expect_equal(all.equal(as.matrix(max_profit$opt_value), 
-                         as.matrix(cbind(BO_revenue$xopt, BO_revenue$yopt)), 
+  expect_equal(all.equal(as.matrix(max_lprofit$opt_value), 
+                         as.matrix(cbind(BO_profit$xopt, BO_profit$yopt)), 
                                    check.attributes = FALSE), TRUE)
   
-  expect_equal(all.equal(as.matrix(max_profit$lambdas), 
-                         as.matrix(BO_revenue$lambda), check.attributes = FALSE), TRUE)
+  expect_equal(all.equal(as.matrix(max_lprofit$lambdas), 
+                         as.matrix(BO_profit$lambda), check.attributes = FALSE), TRUE)
   
 })
 
 test_that("nlprofitDEA", {
   
   X <- matrix(c(1,2,3,3,2,1,2,2), ncol = 2)
-  Y <- matrix(c(1,1,1,1), ncol = 1)
+  Y <- matrix(c(10,10,10,10), ncol = 1)
   
   input_prices <- matrix(c(2,1,2,1,2,1,1,2), ncol =  2, byrow = TRUE)
-  output_prices <- matrix(c(1,1,1,1), ncol = 1)
+  output_prices <- matrix(c(2,2,2,2), ncol = 1)
   
-  max_profit <- nlprofitDEA(X,Y,input_prices, output_prices)
-  BO_revenue <- Benchmarking::profit.opt(X,Y,input_prices, output_prices)
+  max_nlprofit <- nlprofitDEA(X,Y,input_prices, output_prices, RTS = "vrs")
+  BO_profit2 <- Benchmarking::profit.opt(X,Y,input_prices, output_prices, RTS = "vrs")
   
-  expect_equal(all.equal(as.matrix(max_profit$opt_value), 
-                         as.matrix(cbind(BO_revenue$xopt, BO_revenue$yopt)), 
+  expect_equal(all.equal(as.matrix(max_nlprofit$opt_value), 
+                         as.matrix(cbind(BO_profit2$xopt, BO_profit2$yopt)), 
                          check.attributes = FALSE), TRUE)
   
-  expect_equal(all.equal(as.matrix(max_profit$lambdas), 
-                         as.matrix(BO_revenue$lambda), check.attributes = FALSE), TRUE)
+  expect_equal(all.equal(as.matrix(max_nlprofit$lambdas), 
+                         as.matrix(BO_profit2$lambda), check.attributes = FALSE), TRUE)
   
 })
+
+test_that("wrDEA general test", {
+  
+  X <- matrix(c(1, 2, 3, 3, 6, 7, 8, 2, 1, 2), ncol = 2)
+  Y <- matrix(c(1, 1, 1, 1, 2, 2, 2, 2, 3, 3), ncol = 2)
+  
+  for (RTS in c("vrs", "crs", "fdh")) {
+    for (ORIENTATION in c("in", "out")) {
+      AO_dea <- wrDEA(X, Y, RTS = RTS, ORIENTATION = ORIENTATION)
+      BO_dea <- Benchmarking::dea(X,Y,RTS = RTS, ORIENTATION = ORIENTATION)
+      if (ORIENTATION == "in") {
+        expect_equal(AO_dea$eff, BO_dea$eff)
+      } else {
+        expect_equal(AO_dea$eff, 1/BO_dea$eff)
+      }
+    }
+  }
+  
+  AO_dea_ndrs <- wrDEA(X, Y, RTS = "ndrs", ORIENTATION = "in")
+  BO_dea_irs <- Benchmarking::dea(X,Y,RTS = "irs", ORIENTATION = "in")
+  expect_equal(AO_dea_ndrs$eff, BO_dea_irs$eff)
+  
+  AO_dea_nirs <- wrDEA(X, Y, RTS = "nirs", ORIENTATION = "in")
+  BO_dea_drs <- Benchmarking::dea(X,Y,RTS = "drs", ORIENTATION = "in")
+  expect_equal(AO_dea_nirs$eff, BO_dea_drs$eff)
+  
+  AO_dea_ndrs <- wrDEA(X, Y, RTS = "ndrs", ORIENTATION = "out")
+  BO_dea_irs <- Benchmarking::dea(X,Y,RTS = "irs", ORIENTATION = "out")
+  expect_equal(AO_dea_ndrs$eff, 1/BO_dea_irs$eff)
+  
+  AO_dea_nirs <- wrDEA(X, Y, RTS = "nirs", ORIENTATION = "out")
+  BO_dea_drs <- Benchmarking::dea(X,Y,RTS = "drs", ORIENTATION = "out")
+  expect_equal(AO_dea_nirs$eff, 1/BO_dea_drs$eff)
+  
+  AO_dea_supereff <- wrDEA(X, Y, RTS = "vrs", ORIENTATION = "in", SUPEREFF = TRUE)
+  BO_dea_supereff <- Benchmarking::sdea(X,Y,RTS = "vrs", ORIENTATION = "in")
+  
+  # Bogetoft package does not work robustly for super-efficiency -> sometimes error in the test
+  # expect_equal(AO_dea_supereff$eff[AO_dea_supereff$eff > 0 & !is.infinite(AO_dea_supereff$eff)], 
+  #             BO_dea_supereff$eff[BO_dea_supereff$eff > 0 & !is.infinite(BO_dea_supereff$eff)])
+  
+  
+})
+
+test_that("XREF YREF test", {
+  
+  X <- matrix(c(1, 2, 3, 3, 6, 7, 8, 2, 1, 2), ncol = 2)
+  Y <- matrix(c(1, 1, 1, 1, 2, 2, 2, 2, 3, 3), ncol = 2)
+  
+  XREF <- matrix(c(6, 7, 5, 5, 8, 4, 8, 5), ncol = 2)
+  YREF <- matrix(c(1, 4, 5, 3, 10, 4, 2, 2), ncol = 2)
+  
+  AO_dea <- wrDEA(X, Y, XREF = XREF, YREF = YREF, ORIENTATION = "in", RTS = "vrs")
+  BO_dea <- Benchmarking::dea(X,Y, XREF = XREF, YREF = YREF, ORIENTATION = "in", RTS = "vrs")
+  AO_hyp <- hyperbolicDEA(X, Y, XREF = XREF, YREF = YREF, ALPHA = 0, RTS = "vrs")
+  
+  expect_equal(AO_dea$eff, BO_dea$eff)
+  expect_equal(AO_hyp$eff, AO_dea$eff)
+  
+
+})
+
+test_that("Non-disc variables and WR", {
+  
+  x1 <- c(1,1.5,3,3,4,1)
+  x2 <- c(3,1.5,2,4,1,5)
+  X <- cbind(x1,x2)
+  Y <- c(1,1,1,1,1,1)
+  
+  hyp_dea <- hyperbolicDEA(X,Y, RTS = "crs", ALPHA = 0, NONDISC_IN = c(2), SLACK = TRUE)
+  dea_wr <- wrDEA(X[,1],cbind(Y, -X[,2]), RTS = "crs", ORIENTATION = "in", SLACK = TRUE)
+  
+  # Be aware of different data structure in dea_wr -> compare column 2 to 3
+  expect_equal(hyp_dea$eff, dea_wr$eff)
+  expect_equal(hyp_dea$slack[,3], dea_wr$slack[,2])
+  
+  # With weight restrictions so there is no more slack
+  WR <- matrix(c(0,-1,4), nrow = 1)
+  WR2 <- matrix(c(0,-4,-1), nrow = 1)
+  
+  hyp_dea2 <- hyperbolicDEA(X,Y, RTS = "crs", ALPHA = 0, NONDISC_IN = c(2), WR = WR, SLACK = TRUE)
+  dea_wr2 <- wrDEA(X[,1],cbind(Y, -X[,2]), RTS = "crs", ORIENTATION = "in",  WR = WR2, SLACK = TRUE)
+  
+  expect_equal(hyp_dea2$eff, dea_wr2$eff)
+  expect_equal(all.equal(as.matrix(hyp_dea2$slack), 
+                         as.matrix(dea_wr2$slack), check.attributes = FALSE), TRUE)
+  expect_equal(hyp_dea2$mus, as.matrix(dea_wr2$mus))
+})
+
+
+
 
 
