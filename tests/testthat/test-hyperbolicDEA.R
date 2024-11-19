@@ -195,10 +195,10 @@ test_that("lprofitDEA", {
   Y <- matrix(c(1,1,1,1), ncol = 1)
   
   input_prices <- matrix(c(2,1,2,1,2,1,1,2), ncol =  2, byrow = TRUE)
-  output_prices <- matrix(c(1,1,1,1), ncol = 1)
+  output_prices <- matrix(c(10,10,10,10), ncol = 1)
   
-  max_lprofit <- lprofitDEA(X,Y,input_prices, output_prices, RTS = "crs")
-  BO_profit <- Benchmarking::profit.opt(X,Y,input_prices, output_prices, RTS = "crs")
+  max_lprofit <- lprofitDEA(X,Y,input_prices, output_prices, RTS = "vrs")
+  BO_profit <- Benchmarking::profit.opt(X,Y,input_prices, output_prices, RTS = "vrs")
   
   expect_equal(all.equal(as.matrix(max_lprofit$opt_value), 
                          as.matrix(cbind(BO_profit$xopt, BO_profit$yopt)), 
@@ -317,7 +317,46 @@ test_that("Non-disc variables and WR", {
   expect_equal(hyp_dea2$mus, as.matrix(dea_wr2$mus))
 })
 
-
-
-
-
+test_that("Cost efficiency with weight restrictions", {
+  # See illustration in paper on Cost eff with trade off weight restrictions
+  x1 <- c(2, 1.5, 3, 2, 1, 2.5)
+  x2 <- c(1, 2, 0.5, 4, 4, 2)
+  X <- cbind(x1, x2)
+  
+  w1 <- c(2, 2, 2, 2, 2, 2)
+  w2 <- c(1, 1, 1, 1, 1, 1)
+  W <- cbind(w1, w2)
+  
+  Y <- c(1, 1, 1, 1, 1, 1)
+  
+  # Calculate Cost efficiency with the classical approach
+  classic_cost <- costDEA(X, Y, W)
+  
+  # Calculate cost efficiency with trade-off weight restrictions
+  WR <- matrix(c(0,1,-1), nrow = 1, byrow = T)
+  
+  cost_est <- wrDEA(X*W, Y, ORIENTATION = "in", RTS = "crs", 
+                    WR = WR, ECONOMIC = TRUE)
+  
+  expect_equal(classic_cost$cost_eff, cost_est$eff)
+  
+  # From Visual analysis we know the optimal quantities: 
+  x1 <- c(2, 1.5, 2, 1.5, 1.5, 1.786)
+  x2 <- c(1, 2, 1, 2, 2, 1.429)
+  
+  # The estimated quantities: 
+  # Optimal quantities
+  # Multiply the lambdas with the respective input quantities and aggregate
+  opt_quantities <- c()
+  for (i in 1:nrow(X)){
+    opt_quantity <- rep(0, ncol(X))
+    for (j in 1:nrow(X)){
+      opt_quantity <- opt_quantity + (cost_est$lambdas[i,j]*X[j,])
+    }
+    opt_quantities <- rbind(opt_quantities, opt_quantity)
+  }
+  
+  expect_equal(all.equal(as.matrix(round(opt_quantities, 3)), 
+                         cbind(x1, x2), check.attributes = FALSE), TRUE)
+  
+})

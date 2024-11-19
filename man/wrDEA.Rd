@@ -13,7 +13,8 @@ wrDEA(
   XREF = NULL,
   YREF = NULL,
   SUPEREFF = FALSE,
-  SLACK = FALSE
+  SLACK = FALSE,
+  ECONOMIC = FALSE
 )
 }
 \arguments{
@@ -36,6 +37,12 @@ restrictions on inputs.}
 \item{SUPEREFF}{Boolean variable indicating whether super-efficiencies shall be estimated}
 
 \item{SLACK}{Boolean variable indicating whether slack-based estimation should be applied}
+
+\item{ECONOMIC}{Boolean variable indicating whether economic efficiency (cost or revenue) is estimated using trade-off weight restrictions. 
+Therefore mus can be positive and negative when set to TRUE and you have a multi-stage optimization where
+the first stage is the efficiency estimation and the second stage is the minimization of the mus. You have to
+use single trade-off, hence a 1 to 1 substitution of either inputs or outputs given by the focus on
+either cost or revenue efficiency. The data must be value data.}
 }
 \value{
 A list object containing the following information:
@@ -78,4 +85,7 @@ wrDEA(X, Y, ORIENTATION = "in", RTS="vrs", WR = WR)
 
 wrDEA(X[1], Y[1], ORIENTATION = "in", RTS="vrs", XREF = X, YREF = Y, SLACK = TRUE, WR = WR)
 
+}
+\author{
+Alexander Öttl
 }
